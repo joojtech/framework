@@ -2,7 +2,7 @@
 // +----------------------------------------------------------------------
 // | ThinkPHP [ WE CAN DO IT JUST THINK ]
 // +----------------------------------------------------------------------
-// | Copyright (c) 2006~2017 http://thinkphp.cn All rights reserved.
+// | Copyright (c) 2006~2018 http://thinkphp.cn All rights reserved.
 // +----------------------------------------------------------------------
 // | Licensed ( http://www.apache.org/licenses/LICENSE-2.0 )
 // +----------------------------------------------------------------------
@@ -46,9 +46,12 @@ class Redis extends Driver
         if (!empty($options)) {
             $this->options = array_merge($this->options, $options);
         }
-        $func          = $this->options['persistent'] ? 'pconnect' : 'connect';
         $this->handler = new \Redis;
-        $this->handler->$func($this->options['host'], $this->options['port'], $this->options['timeout']);
+        if ($this->options['persistent']) {
+            $this->handler->pconnect($this->options['host'], $this->options['port'], $this->options['timeout'], 'persistent_id_' . $this->options['select']);
+        } else {
+            $this->handler->connect($this->options['host'], $this->options['port'], $this->options['timeout']);
+        }
 
         if ('' != $this->options['password']) {
             $this->handler->auth($this->options['password']);
@@ -67,7 +70,7 @@ class Redis extends Driver
      */
     public function has($name)
     {
-        return $this->handler->get($this->getCacheKey($name)) ? true : false;
+        return $this->handler->exists($this->getCacheKey($name));
     }
 
     /**
@@ -85,7 +88,7 @@ class Redis extends Driver
         }
 
         try {
-            $result = unserialize($value);
+            $result = 0 === strpos($value, 'think_serialize:') ? unserialize(substr($value, 16)) : $value;
         } catch (\Exception $e) {
             $result = $default;
         }
@@ -113,8 +116,8 @@ class Redis extends Driver
             $first = true;
         }
         $key   = $this->getCacheKey($name);
-        $value = serialize($value);
-        if (is_int($expire) && $expire) {
+        $value = is_scalar($value) ? $value : 'think_serialize:' . serialize($value);
+        if ($expire) {
             $result = $this->handler->setex($key, $expire, $value);
         } else {
             $result = $this->handler->set($key, $value);
@@ -126,35 +129,29 @@ class Redis extends Driver
     /**
      * 自增缓存（针对数值缓存）
      * @access public
-     * @param string    $name 缓存变量名
-     * @param int       $step 步长
+     * @param  string    $name 缓存变量名
+     * @param  int       $step 步长
      * @return false|int
      */
     public function inc($name, $step = 1)
     {
-        if ($this->has($name)) {
-            $value = $this->get($name) + $step;
-        } else {
-            $value = $step;
-        }
-        return $this->set($name, $value, 0) ? $value : false;
+        $key = $this->getCacheKey($name);
+
+        return $this->handler->incrby($key, $step);
     }
 
     /**
      * 自减缓存（针对数值缓存）
      * @access public
-     * @param string    $name 缓存变量名
-     * @param int       $step 步长
+     * @param  string    $name 缓存变量名
+     * @param  int       $step 步长
      * @return false|int
      */
     public function dec($name, $step = 1)
     {
-        if ($this->has($name)) {
-            $value = $this->get($name) - $step;
-        } else {
-            $value = -$step;
-        }
-        return $this->set($name, $value, 0) ? $value : false;
+        $key = $this->getCacheKey($name);
+
+        return $this->handler->decrby($key, $step);
     }
 
     /**
